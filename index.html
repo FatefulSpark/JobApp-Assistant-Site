@@ -21,16 +21,16 @@ h1{font-size:1.65rem;margin:0 0 2px;letter-spacing:-.01em}
 h2{font-size:1.15rem;margin:0 0 10px}
 h3{margin:0 0 6px;font-size:1.05rem}
 p.sub{margin:0 0 18px;color:var(--mut)}
+p.tag{margin:0 0 18px;color:var(--ink);font-size:1rem}
 button{font:inherit;font-weight:700;color:var(--deep);background:rgba(255,255,255,.75);border:2px solid var(--blue);border-radius:10px;padding:8px 14px;cursor:pointer}
 button:hover{background:var(--sky)}
 button.pri{background:var(--blue);color:#fff}
 button.pri:hover{background:var(--deep)}
 button.danger{border-color:#b91c1c;color:#b91c1c}
 button.danger:hover{background:#fee2e2}
-button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,.drop:focus-visible{outline:3px solid #f59e0b;outline-offset:2px}
 label{display:block;font-weight:700;font-size:.9rem;margin:0 0 4px}
 input,textarea,select{width:100%;font:inherit;color:var(--ink);background:rgba(255,255,255,.85);border:1.5px solid var(--line);border-radius:10px;padding:9px 11px}
-input[type=file]{padding:7px}
 textarea{resize:vertical;min-height:110px}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px}
 .box{background:rgba(255,255,255,.7);border:1.5px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
@@ -41,12 +41,15 @@ textarea{resize:vertical;min-height:110px}
 .chip{display:inline-flex;gap:6px;align-items:center;border:1.5px solid var(--blue);background:var(--sky);color:var(--deep);border-radius:999px;padding:3px 6px 3px 12px;font-weight:700}
 .chip button{border:0;background:transparent;padding:0 6px;color:var(--deep);line-height:1.2}
 .muted{color:var(--mut);font-size:.92rem}
-.msg{min-height:1.4em;margin:0 0 10px;font-weight:700}
+.msg{min-height:1.4em;margin:0 0 10px;font-weight:700;overflow-wrap:anywhere}
 .msg.ok{color:#047857}.msg.err{color:#b91c1c}
 .bar{height:8px;border-radius:99px;background:#dbeafe;overflow:hidden;margin-top:6px}
 .bar i{display:block;height:100%;background:var(--blue)}
 .auth{max-width:440px;margin:6vh auto;padding:26px}
 .empty{border:1.5px dashed var(--line);border-radius:14px;padding:14px;color:var(--mut);margin-bottom:12px}
+.drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;min-height:150px;padding:22px;margin-bottom:10px;border:2.5px dashed var(--blue);border-radius:16px;background:rgba(219,234,254,.45);color:var(--deep);cursor:pointer}
+.drop:hover,.drop.over{background:var(--sky);border-style:solid}
+.drop strong{font-size:1.1rem}
 .gap{height:12px}
 @media(max-width:780px){body{padding:12px}main{padding:16px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -59,226 +62,14 @@ textarea{resize:vertical;min-height:110px}
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const J=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v==null?d:v}catch(e){return d}};
-const W=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){note("Could not save: browser storage is full or blocked.","err");return false}};
-let uid=J("cf:session",null),view="resume",sview="skills",ed=null,mode="in",found=null,msg=null;
+const W=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){return false}};
+let uid=J("cf:session",null),view="resume",sview="skills",ed=null,mode="in",found=null,msg=null,cur=null,upKind="auto";
 const uniq=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 /* All personal data goes through key(), which is always scoped to the signed-in user's id. */
 const key=k=>{if(!uid)throw new Error("Not signed in");return"cf:u:"+uid+":"+k};
 const get=k=>J(key(k),[]);
-const put=(k,v)=>W(key(k),v);
+const putData=(k,v)=>{if(W(key(k),v))return true;note("Could not save: browser storage is full or blocked.","err");return false};
 function note(t,c){msg={t,c}}
 async function hash(s){try{const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}catch(e){let h=5381;for(const ch of s)h=(h*33^ch.charCodeAt(0))>>>0;return"w"+h}}
 const FOLDERS=[["skills","Skills"],["experiences","Experiences"],["resumes","Resumes"],["letters","Cover Letters"]];
-const STOP=new Set("the and for with that this you your our are will from have has not but all can who their they about into more work able such also been out use using per etc job role team".split(" "));
-const toks=t=>(String(t).toLowerCase().match(/[a-z0-9+#.]{3,}/g)||[]).map(w=>w.replace(/\.+$/,"")).filter(w=>w&&!STOP.has(w));
-const me=()=>Object.values(J("cf:users",{})).find(u=>u.id===uid);
-
-/* ---------- file reading ---------- */
-const PDF="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",PDFW="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",MAM="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
-const loadJS=u=>new Promise((ok,no)=>{if(document.querySelector('script[src="'+u+'"]'))return ok();const s=document.createElement("script");s.src=u;s.onload=ok;s.onerror=()=>no(new Error("Could not load the file reader. Check your internet connection."));document.head.appendChild(s)});
-async function readFile(f){
-  const n=f.name.toLowerCase(),buf=await f.arrayBuffer();
-  if(n.endsWith(".txt"))return new TextDecoder().decode(buf);
-  if(n.endsWith(".pdf")){
-    await loadJS(PDF);pdfjsLib.GlobalWorkerOptions.workerSrc=PDFW;
-    const p=await pdfjsLib.getDocument({data:buf}).promise;let out="";
-    for(let i=1;i<=p.numPages;i++){const c=await(await p.getPage(i)).getTextContent();let y=null;
-      for(const it of c.items){const yy=it.transform[5];if(y!==null)out+=Math.abs(yy-y)>3?"\n":" ";out+=it.str;y=yy}out+="\n"}
-    return out;
-  }
-  if(n.endsWith(".docx")){await loadJS(MAM);return(await mammoth.extractRawText({arrayBuffer:buf})).value}
-  if(n.endsWith(".doc")){const s=new TextDecoder("latin1").decode(buf);return(s.match(/[\x20-\x7E]{25,}/g)||[]).join("\n")}
-  throw new Error("Please choose a PDF, TXT, DOC or DOCX file.");
-}
-/* ---------- reading experiences and skills from text ---------- */
-const HEAD=/^(?:(?:professional|work|relevant|related|technical|key|core|additional|selected|leadership|volunteer)\s+)?(experience|employment|volunteer|volunteering|projects?|activities|leadership|skills?|education|certifications?|summary|objective|languages|awards|interests|references)\s*:?$/i;
-const EXP=/^(experience|employment|volunteer|volunteering|project|projects|activities|leadership)$/;
-const DT=/(?:[A-Za-z]{3,9}\.?\s+)?(?:\d{1,2}\/)?\d{4}\s*[–—-]\s*(?:present|current|now|(?:[A-Za-z]{3,9}\.?\s+)?(?:\d{1,2}\/)?\d{4})/i;
-const BUL=/^[•●▪*·\-–]\s*/;
-function parseDoc(text){
-  const lines=text.split(/\r?\n/).map(l=>l.replace(/\s+/g," ").trim()).filter(Boolean);
-  let sec="";const S={};
-  for(const l of lines){const m=l.length<=40&&l.match(HEAD);if(m){sec=m[1].toLowerCase();S[sec]=S[sec]||[];continue}if(sec)S[sec].push(l)}
-  const skills=[];
-  for(const k in S)if(/^skill/.test(k))S[k].forEach(l=>l.replace(BUL,"").replace(/^[^:,]{0,30}:\s*/,"").split(/[,;|•·●▪]/).map(x=>x.trim()).forEach(x=>{if(x.length>1&&x.length<=40)skills.push(x)}));
-  const exps=[];let cur=null;
-  const push=()=>{if(cur&&cur.title)exps.push({title:cur.title,org:cur.org,dates:cur.dates,desc:cur.d.join("\n")});cur=null};
-  for(const k in S){if(!EXP.test(k))continue;push();
-    for(const l of S[k]){
-      if(BUL.test(l)){if(cur)cur.d.push(l.replace(BUL,""));continue}
-      if(cur&&cur.d.length&&/^[a-z]/.test(l)){cur.d[cur.d.length-1]+=" "+l;continue}
-      if(cur&&!cur.dates&&DT.test(l)&&l.length<40){cur.dates=l.match(DT)[0];continue}
-      if(cur&&!cur.d.length&&!cur.org&&!DT.test(l)&&l.length<80){cur.org=l.split(/\s[–—-]\s/)[0].trim();continue}
-      push();
-      const dt=(l.match(DT)||[""])[0],c=l.replace(DT,"").replace(/[()]/g,"").replace(/^[\s,|–—-]+|[\s,|–—-]+$/g,""),p=c.split(/\s[–—-]\s|\s\|\s/);
-      cur={title:(p[0]||"").trim(),org:(p[1]||"").trim(),dates:dt,d:[]};
-    }
-    push();
-  }
-  return{skills,exps};
-}
-async function handleUpload(file,kind){
-  const u0=uid,text=(await readFile(file)).trim();
-  if(text.length<30)throw new Error("No readable text found. Scanned pages and images can't be read yet. Try a text-based PDF, DOCX or TXT.");
-  if(uid!==u0)throw new Error("Signed out before the file finished reading.");
-  const r=parseDoc(text);
-  const sk=get("skills"),have=new Set(sk.map(x=>x.name.toLowerCase()));let ns=0;
-  r.skills.forEach(x=>{if(!have.has(x.toLowerCase())){have.add(x.toLowerCase());sk.push({id:uniq(),name:x});ns++}});
-  const ex=get("experiences"),seen=new Set(ex.map(x=>(x.title+"|"+x.org).toLowerCase()));let ne=0;
-  r.exps.forEach(x=>{const id=(x.title+"|"+x.org).toLowerCase();if(!seen.has(id)){seen.add(id);ex.push({id:uniq(),...x});ne++}});
-  if(ns)put("skills",sk);if(ne)put("experiences",ex);
-  makeDoc(kind,file.name.replace(/\.[^.]+$/,""),text);
-  return`Saved "${file.name}" as an editable ${kind==="resumes"?"resume":"cover letter"}. Added ${ns} skill${ns===1?"":"s"} and ${ne} experience${ne===1?"":"s"}.`;
-}
-
-/* ---------- views ---------- */
-function render(){
-  const a=$("#app");
-  if(!uid){a.innerHTML=authView();return}
-  const m=me();if(!m){uid=null;W("cf:session",null);return render()}
-  const t=(v,n)=>`<button class="${view===v?"pri":""}" data-act="go" data-v="${v}">${n}</button>`;
-  const ms=msg?`<p class="msg ${msg.c}" role="status">${esc(msg.t)}</p>`:`<p class="msg" role="status"></p>`;msg=null;
-  a.innerHTML=`<header class="top glass"><div class="brand">Careerfolio</div><div class="tabs" role="tablist">${t("resume","Resume Builder")}${t("letter","Cover Letter Builder")}</div>
-  <div class="right">${t("storage","Storage")}<span>${esc(m.name)}</span><button data-act="out">Sign out</button></div></header><main class="glass">${ms}${body()}</main>`;
-}
-function authView(){
-  const up=mode==="up";
-  const m=msg?`<p class="msg ${msg.c}" role="status">${esc(msg.t)}</p>`:`<p class="msg" role="status"></p>`;msg=null;
-  return`<div class="auth glass"><h1>Welcome to Careerfolio.</h1><p class="sub">Let's get you hired.</p>
-  <div class="tabs"><button class="${up?"":"pri"}" data-act="mode" data-v="in">Sign in</button><button class="${up?"pri":""}" data-act="mode" data-v="up">Create account</button></div>${m}
-  <form data-form="auth">${up?`<div class="box"><label for="n">Your name</label><input id="n" name="name" required maxlength="60" autocomplete="name"></div>`:""}
-  <div class="box"><label for="e">Email</label><input id="e" name="email" type="email" required autocomplete="email"></div>
-  <div class="box"><label for="p">Password (6+ characters)</label><input id="p" name="pw" type="password" required minlength="6" autocomplete="${up?"new-password":"current-password"}"></div>
-  <button class="pri" type="submit">${up?"Create account":"Sign in"}</button></form>
-  <p class="muted">Your data stays in this browser.</p></div>`;
-}
-function body(){
-  if(ed)return editorView();
-  if(view==="storage")return storageView();
-  return builderView(view==="letter"?"letters":"resumes");
-}
-function builderView(k){
-  const first=esc(me().name.split(" ")[0]);
-  return`<h1>Welcome back, ${first}.</h1><p class="sub">Ready when you are.</p>
-  <form data-form="match" class="box"><h2>Target job</h2><div class="row"><div><label for="jt">Job title</label><input id="jt" name="jt" required maxlength="80"></div><div><label for="jc">Company</label><input id="jc" name="jc" required maxlength="80"></div></div>
-  <label for="jd">Job description</label><textarea id="jd" name="jd" required style="min-height:160px"></textarea><div class="gap"></div><button class="pri" type="submit">Find my best matches</button></form>
-  ${found?resultView(k):""}${docsView(k)}`;
-}
-function resultView(k){
-  const f=found,lab=k==="resumes"?"resume":"cover letter";
-  const sk=f.skills.length?f.skills.map(s=>`<div class="box"><strong>${esc(s.name)}</strong><div class="bar"><i style="width:${s.pct}%"></i></div></div>`).join(""):`<div class="empty">No saved skills match this job yet.</div>`;
-  const ex=f.exps.length?f.exps.map(s=>`<div class="box"><strong>${esc(s.title)}${s.org?" – "+esc(s.org):""}</strong><div class="bar"><i style="width:${s.pct}%"></i></div></div>`).join(""):`<div class="empty">No saved experiences match this job yet.</div>`;
-  return`<h2>Best skills for ${esc(f.jt)} at ${esc(f.jc)}</h2>${sk}<h2>Best experiences to feature</h2>${ex}
-  <div class="acts" style="margin-bottom:22px"><button class="pri" data-act="draft" data-k="${k}">Create ${lab} draft</button></div>`;
-}
-function storageView(){
-  const tabs=FOLDERS.map(([k,n])=>`<button class="${sview===k?"pri":""}" data-act="sgo" data-v="${k}">${n} (${get(k).length})</button>`).join("");
-  return`<h1>Storage</h1><p class="sub">Everything you've saved, in one place.</p>
-  <form data-form="upload" class="box"><h2>Upload a file</h2><div class="row"><div><label for="fl">File (PDF, TXT, DOC or DOCX)</label><input id="fl" name="file" type="file" accept=".pdf,.txt,.doc,.docx" required></div>
-  <div><label for="kd">Save it as a</label><select id="kd" name="kind"><option value="resumes">Resume</option><option value="letters">Cover letter</option></select></div></div>
-  <button class="pri" type="submit">Upload and read</button> <span class="muted">Files are read in your browser.</span></form>
-  <div class="tabs">${tabs}</div>${sview==="skills"?skillsView():sview==="experiences"?expView():docsView(sview)}`;
-}
-function skillsView(){
-  const s=get("skills");
-  return`<form data-form="skill" class="box"><label for="sk">Add skills (separate with commas)</label><div class="row"><input id="sk" name="skills" required placeholder="Excel, Public speaking, Customer service"></div><button class="pri" type="submit">Add skills</button></form>
-  ${s.length?`<div class="chips">${s.map(x=>`<span class="chip">${esc(x.name)}<button data-act="delskill" data-id="${x.id}" aria-label="Remove ${esc(x.name)}">&times;</button></span>`).join("")}</div>`:`<div class="empty">No skills saved yet.</div>`}`;
-}
-function expView(){
-  const e=get("experiences");
-  return`<form data-form="exp" class="box"><div class="row"><div><label for="t">Role</label><input id="t" name="title" required maxlength="80"></div><div><label for="o">Organization</label><input id="o" name="org" maxlength="80"></div><div><label for="d">Dates</label><input id="d" name="dates" maxlength="40" placeholder="Nov 2025 – Jan 2026"></div></div>
-  <label for="ds">What you did (one point per line)</label><textarea id="ds" name="desc" required></textarea><div class="gap"></div><button class="pri" type="submit">Save experience</button></form>
-  ${e.length?e.map(x=>`<div class="box item"><div><h3>${esc(x.title)}${x.org?" – "+esc(x.org):""}</h3><div class="muted">${esc(x.dates)}</div><div>${esc(x.desc).replace(/\n/g,"<br>")}</div></div><div class="acts"><button class="danger" data-act="delexp" data-id="${x.id}">Delete</button></div></div>`).join(""):`<div class="empty">No experiences saved yet.</div>`}`;
-}
-function docsView(k){
-  const label=k==="resumes"?"resume":"cover letter",d=get(k);
-  return`<h2>${k==="resumes"?"Your resumes":"Your cover letters"}</h2>
-  <form data-form="newdoc" class="box"><input type="hidden" name="k" value="${k}"><label for="dt${k}">New ${label}</label><div class="row"><input id="dt${k}" name="title" required maxlength="80" placeholder="${k==="resumes"?"Resume – Marketing intern":"Cover letter – Acme Corp"}"></div><button class="pri" type="submit">Create ${label}</button></form>
-  ${d.length?d.map(x=>`<div class="box item"><div><h3>${esc(x.title)}</h3><div class="muted">${x.versions.length} version${x.versions.length===1?"":"s"} · updated ${new Date(x.versions[x.versions.length-1].ts).toLocaleString()}</div></div><div class="acts"><button class="pri" data-act="open" data-k="${k}" data-id="${x.id}">Open</button><button data-act="dup" data-k="${k}" data-id="${x.id}">Duplicate</button><button class="danger" data-act="deldoc" data-k="${k}" data-id="${x.id}">Delete</button></div></div>`).join(""):`<div class="empty">No ${label}s yet.</div>`}`;
-}
-function editorView(){
-  const d=get(ed.kind).find(x=>x.id===ed.id);
-  if(!d){ed=null;return body()}
-  const last=d.versions[d.versions.length-1];
-  return`<h1>${esc(d.title)}</h1>
-  <div class="box"><label for="tt">Title</label><input id="tt" value="${esc(d.title)}" maxlength="80"><div class="gap"></div><label for="tx">Document</label><textarea id="tx" style="min-height:340px">${esc(last?last.text:"")}</textarea></div>
-  <div class="acts" style="margin-bottom:18px"><button class="pri" data-act="save">Save new version</button><button data-act="back">Back</button></div>
-  <h2>Version history</h2>${d.versions.slice().reverse().map((v,i)=>{const n=d.versions.length-i;return`<div class="box item"><div><strong>Version ${n}</strong><div class="muted">${new Date(v.ts).toLocaleString()} · ${v.text.length} characters</div></div><div class="acts"><button data-act="load" data-n="${n-1}">Load into editor</button></div></div>`}).join("")}`;
-}
-/* ---------- matching and drafts ---------- */
-function analyze(jt,jc,jd){
-  const text=(jt+" "+jd).toLowerCase(),jt_=new Set(toks(text));
-  const sk=get("skills").map(s=>{const n=s.name.toLowerCase();let sc=text.includes(n)?10:0;toks(n).forEach(w=>{if(jt_.has(w))sc+=3});return{...s,sc}}).filter(s=>s.sc>0).sort((a,b)=>b.sc-a.sc).slice(0,8);
-  const mine=get("skills").map(s=>s.name.toLowerCase());
-  const ex=get("experiences").map(e=>{const b=(e.title+" "+e.org+" "+e.desc).toLowerCase();let sc=0;new Set(toks(b)).forEach(w=>{if(jt_.has(w))sc+=1});mine.forEach(n=>{if(text.includes(n)&&b.includes(n))sc+=4});return{...e,sc}}).filter(e=>e.sc>0).sort((a,b)=>b.sc-a.sc).slice(0,4);
-  const pct=l=>{const m=l.length?l[0].sc:1;l.forEach(x=>x.pct=Math.max(12,Math.round(x.sc/m*100)))};pct(sk);pct(ex);
-  return{jt,jc,skills:sk,exps:ex};
-}
-function draft(k){
-  const f=found,name=me().name,sk=f.skills.map(s=>s.name),bul=e=>e.desc.split("\n").map(l=>l.trim()).filter(Boolean).map(l=>"• "+l).join("\n");
-  if(k==="resumes")return`${name}\n\nSUMMARY\nMotivated candidate applying for ${f.jt} at ${f.jc}, with strengths in ${sk.slice(0,3).join(", ")||"[add your top skills]"}.\n\nKEY SKILLS\n${sk.join(" · ")||"[add skills in Storage]"}\n\nEXPERIENCE\n${f.exps.map(e=>`${e.title}${e.org?" – "+e.org:""}${e.dates?" ("+e.dates+")":""}\n${bul(e)}`).join("\n\n")||"[add experiences in Storage]"}\n`;
-  const e=f.exps[0];
-  return`Dear ${f.jc} Hiring Team,\n\nI am excited to apply for the ${f.jt} position at ${f.jc}. My strengths in ${sk.slice(0,3).join(", ")||"[your top skills]"} match what this role asks for.\n\n${e?`As ${e.title}${e.org?" at "+e.org:""}, I put these skills into practice:\n${bul(e)}\n\n`:""}I would welcome the chance to bring this experience to ${f.jc}. Thank you for your time and consideration.\n\nSincerely,\n${name}\n`;
-}
-function makeDoc(k,title,text){
-  const d=get(k),doc={id:uniq(),title,versions:[{ts:Date.now(),text}]};
-  d.push(doc);return put(k,d)?doc:null;
-}
-/* ---------- events ---------- */
-document.addEventListener("submit",async ev=>{
-  const f=ev.target.dataset.form;if(!f)return;ev.preventDefault();
-  const v=Object.fromEntries(new FormData(ev.target).entries());
-  if(f==="auth"){
-    const email=v.email.trim().toLowerCase(),users=J("cf:users",{});
-    if(mode==="up"){
-      if(users[email]){note("That email already has an account. Try signing in.","err");return render()}
-      const salt=uniq()+uniq();users[email]={id:uniq()+uniq(),name:v.name.trim(),salt,hash:await hash(salt+v.pw)};
-      if(!W("cf:users",users))return render();uid=users[email].id;
-    }else{
-      const u=users[email];
-      if(!u||u.hash!==await hash(u.salt+v.pw)){note("Email or password is incorrect.","err");return render()}
-      uid=u.id;
-    }
-    W("cf:session",uid);view="resume";ed=null;found=null;return render();
-  }
-  if(f==="upload"){
-    const file=v.file;if(!file||!file.name){note("Choose a file first.","err");return render()}
-    note("Reading "+file.name+"…","ok");render();
-    try{note(await handleUpload(file,v.kind),"ok")}catch(e){note(e.message||"Couldn't read that file.","err")}
-    return render();
-  }
-  if(f==="skill"){
-    const s=get("skills"),have=new Set(s.map(x=>x.name.toLowerCase()));let n=0;
-    v.skills.split(",").map(x=>x.trim()).filter(Boolean).forEach(x=>{if(!have.has(x.toLowerCase())){have.add(x.toLowerCase());s.push({id:uniq(),name:x.slice(0,60)});n++}});
-    if(put("skills",s))note(n?`Added ${n} skill${n>1?"s":""}.`:"Those skills are already saved.",n?"ok":"err");
-  }
-  if(f==="exp"){const e=get("experiences");e.push({id:uniq(),title:v.title.trim(),org:(v.org||"").trim(),dates:(v.dates||"").trim(),desc:v.desc.trim()});if(put("experiences",e))note("Experience saved.","ok")}
-  if(f==="newdoc"){const d=makeDoc(v.k,v.title.trim(),"");if(d)ed={kind:v.k,id:d.id}}
-  if(f==="match"){found=analyze(v.jt.trim(),v.jc.trim(),v.jd)}
-  render();
-});
-document.addEventListener("click",ev=>{
-  const b=ev.target.closest("[data-act]");if(!b)return;
-  const a=b.dataset.act,id=b.dataset.id,k=b.dataset.k;
-  if(a==="mode"){mode=b.dataset.v;msg=null}
-  else if(a==="out"){uid=null;ed=null;found=null;W("cf:session",null)}
-  else if(a==="go"){view=b.dataset.v;ed=null}
-  else if(a==="sgo"){sview=b.dataset.v}
-  else if(a==="delskill"){put("skills",get("skills").filter(x=>x.id!==id))}
-  else if(a==="delexp"){if(confirm("Delete this experience?"))put("experiences",get("experiences").filter(x=>x.id!==id))}
-  else if(a==="deldoc"){if(confirm("Delete this document and all its versions?"))put(k,get(k).filter(x=>x.id!==id))}
-  else if(a==="open"){ed={kind:k,id}}
-  else if(a==="dup"){const d=get(k).find(x=>x.id===id);if(d){const c=makeDoc(k,(d.title+" (copy)").slice(0,80),d.versions[d.versions.length-1].text);if(c)note("Copy created.","ok")}}
-  else if(a==="back"){ed=null}
-  else if(a==="load"){const d=get(ed.kind).find(x=>x.id===ed.id);note("Version loaded. Save to keep it as a new version.","ok");render();$("#tx").value=d.versions[+b.dataset.n].text;return}
-  else if(a==="save"){
-    const all=get(ed.kind),d=all.find(x=>x.id===ed.id);d.title=($("#tt").value.trim()||d.title).slice(0,80);d.versions.push({ts:Date.now(),text:$("#tx").value});
-    if(put(ed.kind,all))note(`Saved as version ${d.versions.length}.`,"ok");
-  }
-  else if(a==="draft"){const d=makeDoc(k,(k==="resumes"?"Resume – ":"Cover letter – ")+found.jt+" at "+found.jc,draft(k));if(d){ed={kind:k,id:d.id};note("Draft created. Edit it and save a new version.","ok")}}
-  render();
-});
-render();
-</script>
-</body>
-</html>
+const STOP=new Set("the and for with that this you your our are will from have has not but all can who their
